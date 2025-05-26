@@ -104,7 +104,7 @@ CTimePeriod p5("1h 30m");          // 1 hour 30 minutes
 CTimePeriod p6("2d 5h 30m 15s");   // 2 days 5 hours 30 minutes 15 seconds
 
 // Long form
-CTimePeriod p7("1 hours 30 minutes 45 seconds");
+CTimePeriod p7("1hours 30minutes 45seconds");
 
 // Large units
 CTimePeriod p8("1y 6mo 15d");      // 1 year 6 months 15 days

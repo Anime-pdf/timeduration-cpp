@@ -206,6 +206,8 @@ public:
         if (m_Hours > 0) result += std::to_string(m_Hours) + "h ";
         if (m_Minutes > 0) result += std::to_string(m_Minutes) + "m ";
         if (m_Seconds > 0 || result.empty()) result += std::to_string(m_Seconds) + "s";
+        if (result.ends_with(' '))
+            result.erase(result.end() - 1);
         return result;
     }
 
