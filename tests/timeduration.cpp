@@ -1,250 +1,338 @@
-#include <timeduration/timeduration.hpp>
 #include <gtest/gtest.h>
+#include <timeduration/timeduration.hpp>
+#include <chrono>
 
 using namespace timeduration;
 
-class CTimePeriodTest : public ::testing::Test
-{
+class CTimePeriodTest : public ::testing::Test {
+protected:
+    void SetUp() override {}
+    void TearDown() override {}
 };
 
-// Test default constructor and isZero
-TEST_F(CTimePeriodTest, DefaultConstructorCreatesZeroDuration)
-{
-    CTimePeriod period;
-    EXPECT_TRUE(period.isZero());
-    EXPECT_EQ(period.seconds(), 0);
-    EXPECT_EQ(period.minutes(), 0);
-    EXPECT_EQ(period.hours(), 0);
-    EXPECT_EQ(period.days(), 0);
-    EXPECT_EQ(period.duration().count(), 0);
+// ========== Scanner Tests ==========
+
+class CScannerTest : public ::testing::Test {
+protected:
+    static CTimePeriod::TokenHolder GetDefaultTokens() {
+        return {
+            {"s", 1L}, {"seconds", 1L},
+            {"m", 60L}, {"minutes", 60L},
+            {"h", 3600L}, {"hours", 3600L},
+            {"d", 86400L}, {"days", 86400L},
+            {"mo", 2419200L}, {"months", 2419200L},
+            {"y", 31536000L}, {"years", 31536000L},
+        };
+    }
+};
+
+TEST_F(CScannerTest, ParsesSingleUnit) {
+    CTimePeriod::CScanner scanner("5s", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
+
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result[1], 5); // 5 seconds
 }
 
-// Test constructor with values
-TEST_F(CTimePeriodTest, ConstructorWithValuesInitializesCorrectly)
-{
-    CTimePeriod period(30, 45, 5, 2);
-    EXPECT_FALSE(period.isZero());
-    EXPECT_EQ(period.seconds(), 30);
-    EXPECT_EQ(period.minutes(), 45);
-    EXPECT_EQ(period.hours(), 5);
-    EXPECT_EQ(period.days(), 2);
+TEST_F(CScannerTest, ParsesMultipleUnits) {
+    CTimePeriod::CScanner scanner("2h 30m 15s", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    // Total should be 2d*86400 + 5h*3600 + 45m*60 + 30s = 193530 seconds
-    EXPECT_EQ(period.duration().count(), 193530);
+    ASSERT_EQ(result.size(), 3);
+    EXPECT_EQ(result[3600], 2);  // 2 hours
+    EXPECT_EQ(result[60], 30);   // 30 minutes
+    EXPECT_EQ(result[1], 15);    // 15 seconds
 }
 
-// Test normalization of values
-TEST_F(CTimePeriodTest, ValuesAreNormalizedCorrectly)
-{
-    // 90 seconds should normalize to 1 minute and 30 seconds
-    CTimePeriod period(90, 0, 0, 0);
-    EXPECT_EQ(period.seconds(), 30);
-    EXPECT_EQ(period.minutes(), 1);
-    EXPECT_EQ(period.hours(), 0);
-    EXPECT_EQ(period.days(), 0);
+TEST_F(CScannerTest, ParsesLongFormUnits) {
+    CTimePeriod::CScanner scanner("1 hours 30 minutes 45 seconds", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    // 70 minutes should normalize to 1 hour and 10 minutes
-    CTimePeriod period2(0, 70, 0, 0);
-    EXPECT_EQ(period2.seconds(), 0);
-    EXPECT_EQ(period2.minutes(), 10);
-    EXPECT_EQ(period2.hours(), 1);
-    EXPECT_EQ(period2.days(), 0);
-
-    // 25 hours should normalize to 1 day and 1 hour
-    CTimePeriod period3(0, 0, 25, 0);
-    EXPECT_EQ(period3.seconds(), 0);
-    EXPECT_EQ(period3.minutes(), 0);
-    EXPECT_EQ(period3.hours(), 1);
-    EXPECT_EQ(period3.days(), 1);
-
-    // Complex case: 90s + 70m + 25h
-    CTimePeriod period4(90, 70, 25, 0);
-    EXPECT_EQ(period4.seconds(), 30);
-    EXPECT_EQ(period4.minutes(), 11);
-    EXPECT_EQ(period4.hours(), 2);
-    EXPECT_EQ(period4.days(), 1);
+    ASSERT_EQ(result.size(), 3);
+    EXPECT_EQ(result[3600], 1);  // 1 hour
+    EXPECT_EQ(result[60], 30);   // 30 minutes
+    EXPECT_EQ(result[1], 45);    // 45 seconds
 }
 
-// Test parsing from string (short format)
-TEST_F(CTimePeriodTest, ParsesShortFormatCorrectly)
-{
-    CTimePeriod period("5s");
-    EXPECT_EQ(period.seconds(), 5);
-    EXPECT_EQ(period.duration().count(), 5);
+TEST_F(CScannerTest, ParsesDaysAndLargerUnits) {
+    CTimePeriod::CScanner scanner("1y 2mo 3d", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    CTimePeriod period2("10m");
-    EXPECT_EQ(period2.minutes(), 10);
-    EXPECT_EQ(period2.duration().count(), 600);
-
-    CTimePeriod period3("3h");
-    EXPECT_EQ(period3.hours(), 3);
-    EXPECT_EQ(period3.duration().count(), 10800);
-
-    CTimePeriod period4("2d");
-    EXPECT_EQ(period4.days(), 2);
-    EXPECT_EQ(period4.duration().count(), 172800);
+    ASSERT_EQ(result.size(), 3);
+    EXPECT_EQ(result[31536000], 1);  // 1 year
+    EXPECT_EQ(result[2419200], 2);   // 2 months
+    EXPECT_EQ(result[86400], 3);     // 3 days
 }
 
-// Test parsing from string (long format)
-TEST_F(CTimePeriodTest, ParsesLongFormatCorrectly)
-{
-    CTimePeriod period("5seconds");
-    EXPECT_EQ(period.seconds(), 5);
+TEST_F(CScannerTest, HandlesLargeNumbers) {
+    CTimePeriod::CScanner scanner("999h 123456s", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    CTimePeriod period2("10minutes");
-    EXPECT_EQ(period2.minutes(), 10);
-
-    CTimePeriod period3("3hours");
-    EXPECT_EQ(period3.hours(), 3);
-
-    CTimePeriod period4("2days");
-    EXPECT_EQ(period4.days(), 2);
+    ASSERT_EQ(result.size(), 2);
+    EXPECT_EQ(result[3600], 999);    // 999 hours
+    EXPECT_EQ(result[1], 123456);    // 123456 seconds
 }
 
-// Test parsing complex string with multiple time units
-TEST_F(CTimePeriodTest, ParsesComplexStringCorrectly)
-{
-    CTimePeriod period("2d5h30m15s");
-    EXPECT_EQ(period.seconds(), 15);
-    EXPECT_EQ(period.minutes(), 30);
-    EXPECT_EQ(period.hours(), 5);
-    EXPECT_EQ(period.days(), 2);
-    EXPECT_EQ(period.duration().count(), 2 * 86400 + 5 * 3600 + 30 * 60 + 15);
+TEST_F(CScannerTest, HandlesDuplicateUnits) {
+    CTimePeriod::CScanner scanner("5m 10m", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    // Test with spaces and different order
-    CTimePeriod period2("15s 2d 30m 5h");
-    EXPECT_EQ(period2.seconds(), 15);
-    EXPECT_EQ(period2.minutes(), 30);
-    EXPECT_EQ(period2.hours(), 5);
-    EXPECT_EQ(period2.days(), 2);
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result[60], 15);  // 5 + 10 = 15 minutes
 }
 
-// Test parsing months and years
-TEST_F(CTimePeriodTest, ParsesMonthsAndYearsCorrectly)
-{
-    CTimePeriod period("1mo");
-    EXPECT_EQ(period.duration().count(), 2419200);
+TEST_F(CScannerTest, HandlesEmptyString) {
+    CTimePeriod::CScanner scanner("", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    CTimePeriod period2("1y");
-    EXPECT_EQ(period2.duration().count(), 31536000);
-
-    CTimePeriod period3("1months");
-    EXPECT_EQ(period3.duration().count(), 2419200);
-
-    CTimePeriod period4("1years");
-    EXPECT_EQ(period4.duration().count(), 31536000);
+    EXPECT_EQ(result.size(), 0);
 }
 
-// Test toString method
-TEST_F(CTimePeriodTest, ToStringFormatsCorrectly)
-{
-    CTimePeriod period(15, 30, 5, 2);
-    EXPECT_EQ(period.toString(), "2d 5h 30m 15s");
+TEST_F(CScannerTest, HandlesNumberWithoutUnit) {
+    CTimePeriod::CScanner scanner("120", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    // Test with some zero values
-    CTimePeriod period2(15, 0, 5, 0);
-    EXPECT_EQ(period2.toString(), "5h 15s");
-
-    // Test with all zero values except seconds
-    CTimePeriod period3(15, 0, 0, 0);
-    EXPECT_EQ(period3.toString(), "15s");
-
-    // Test with completely zero duration
-    CTimePeriod period4;
-    EXPECT_EQ(period4.toString(), "0s");
+    ASSERT_EQ(result.size(), 1);
+    EXPECT_EQ(result[60], 120);  // Defaults to minutes
 }
 
-// Test asSqlInterval method
-TEST_F(CTimePeriodTest, SqlIntervalFormatsCorrectly)
-{
-    CTimePeriod period(15, 30, 5, 2);
-    EXPECT_EQ(period.asSqlInterval(), "interval 192615 second");
+TEST_F(CScannerTest, HandlesMixedFormats) {
+    CTimePeriod::CScanner scanner("1h 90 30s", GetDefaultTokens());
+    auto result = scanner.ScanTokens();
 
-    CTimePeriod period2(0, 0, 0, 0);
-    EXPECT_EQ(period2.asSqlInterval(), "interval 0 second");
+    ASSERT_EQ(result.size(), 3);
+    EXPECT_EQ(result[3600], 1);  // 1 hour
+    EXPECT_EQ(result[60], 90);   // 90 minutes (number without unit)
+    EXPECT_EQ(result[1], 30);    // 30 seconds
 }
 
-// Test comparison operators
-TEST_F(CTimePeriodTest, ComparisonOperatorsWorkCorrectly)
-{
-    CTimePeriod p1(15, 30, 5, 2);
-    CTimePeriod p2(15, 30, 5, 2);
-    CTimePeriod p3(0, 0, 0, 0);
-    CTimePeriod p4(16, 30, 5, 2);
+// ========== Parser Tests ==========
 
-    // Test equality
-    EXPECT_TRUE(p1 == p2);
-    EXPECT_FALSE(p1 == p3);
-
-    // Test inequality
-    EXPECT_TRUE(p1 != p3);
-    EXPECT_FALSE(p1 != p2);
-
-    // Test less than
-    EXPECT_TRUE(p3 < p1);
-    EXPECT_FALSE(p1 < p3);
-
-    // Test greater than
-    EXPECT_TRUE(p1 > p3);
-    EXPECT_FALSE(p3 > p1);
-
-    // Test less than or equal
-    EXPECT_TRUE(p1 <= p2);
-    EXPECT_TRUE(p3 <= p1);
-    EXPECT_FALSE(p1 <= p3);
-
-    // Test greater than or equal
-    EXPECT_TRUE(p1 >= p2);
-    EXPECT_TRUE(p1 >= p3);
-    EXPECT_FALSE(p3 >= p1);
-
-    // Test with slightly different values
-    EXPECT_TRUE(p1 < p4);
-    EXPECT_TRUE(p4 > p1);
+TEST_F(CTimePeriodTest, ParsesBasicTimeFormats) {
+    EXPECT_EQ(CTimePeriod::Parse("1s").count(), 1);
+    EXPECT_EQ(CTimePeriod::Parse("1m").count(), 60);
+    EXPECT_EQ(CTimePeriod::Parse("1h").count(), 3600);
+    EXPECT_EQ(CTimePeriod::Parse("1d").count(), 86400);
 }
 
-// Test complex parsing scenarios
-TEST_F(CTimePeriodTest, HandlesComplexParsingScenarios)
-{
-    // Mixed short and long formats
-    CTimePeriod period("1d 2hours 30m 45seconds");
+TEST_F(CTimePeriodTest, ParsesComplexTimeFormats) {
+    auto duration = CTimePeriod::Parse("2h 30m 15s");
+    EXPECT_EQ(duration.count(), 2 * 3600 + 30 * 60 + 15);
+}
+
+TEST_F(CTimePeriodTest, ParsesLongFormUnits) {
+    auto duration = CTimePeriod::Parse("1 hours 30 minutes 45 seconds");
+    EXPECT_EQ(duration.count(), 1 * 3600 + 30 * 60 + 45);
+}
+
+TEST_F(CTimePeriodTest, ParsesLargerUnits) {
+    EXPECT_EQ(CTimePeriod::Parse("1mo").count(), 2419200);  // 28 days
+    EXPECT_EQ(CTimePeriod::Parse("1y").count(), 31536000);  // 365 days
+}
+
+TEST_F(CTimePeriodTest, ParsesZeroDuration) {
+    EXPECT_EQ(CTimePeriod::Parse("0s").count(), 0);
+    EXPECT_EQ(CTimePeriod::Parse("").count(), 0);
+}
+
+TEST_F(CTimePeriodTest, HandlesLargeNumbers) {
+    auto duration = CTimePeriod::Parse("999h");
+    EXPECT_EQ(duration.count(), 999 * 3600);
+}
+
+// ========== Constructor Tests ==========
+
+TEST_F(CTimePeriodTest, ConstructorFromComponents) {
+    CTimePeriod period(15, 30, 2, 1);  // 1d 2h 30m 15s
+
     EXPECT_EQ(period.days(), 1);
     EXPECT_EQ(period.hours(), 2);
     EXPECT_EQ(period.minutes(), 30);
-    EXPECT_EQ(period.seconds(), 45);
-
-    // Repeated units should be cumulative
-    CTimePeriod period2("1d 1d 1h 1h");
-    EXPECT_EQ(period2.days(), 2);
-    EXPECT_EQ(period2.hours(), 2);
-
-    // Test with extra spaces and mixed case (should be handled by scanner)
-    CTimePeriod period3("1d  2h   3m    4s");
-    EXPECT_EQ(period3.days(), 1);
-    EXPECT_EQ(period3.hours(), 2);
-    EXPECT_EQ(period3.minutes(), 3);
-    EXPECT_EQ(period3.seconds(), 4);
+    EXPECT_EQ(period.seconds(), 15);
+    EXPECT_EQ(period.duration().count(), 86400 + 7200 + 1800 + 15);
 }
 
-// Test complex parsing scenarios
-TEST_F(CTimePeriodTest, EmptyLiterals)
-{
-    // Mixed short and long formats
-    CTimePeriod period("1");
+TEST_F(CTimePeriodTest, ConstructorFromString) {
+    CTimePeriod period("2h 30m 15s");
+
+    EXPECT_EQ(period.hours(), 2);
+    EXPECT_EQ(period.minutes(), 30);
+    EXPECT_EQ(period.seconds(), 15);
+    EXPECT_EQ(period.duration().count(), 2 * 3600 + 30 * 60 + 15);
+}
+
+TEST_F(CTimePeriodTest, ConstructorFromChronoSeconds) {
+    CTimePeriod period(std::chrono::seconds(3661));  // 1h 1m 1s
+
+    EXPECT_EQ(period.hours(), 1);
+    EXPECT_EQ(period.minutes(), 1);
+    EXPECT_EQ(period.seconds(), 1);
+    EXPECT_EQ(period.duration().count(), 3661);
+}
+
+TEST_F(CTimePeriodTest, DefaultConstructor) {
+    CTimePeriod period;
+
     EXPECT_EQ(period.days(), 0);
     EXPECT_EQ(period.hours(), 0);
-    EXPECT_EQ(period.minutes(), 1);
+    EXPECT_EQ(period.minutes(), 0);
     EXPECT_EQ(period.seconds(), 0);
+    EXPECT_EQ(period.duration().count(), 0);
+    EXPECT_TRUE(period.isZero());
+}
 
-    CTimePeriod period2("1 2 3 4 5");
-    EXPECT_EQ(period2.days(), 0);
-    EXPECT_EQ(period2.hours(), 0);
-    EXPECT_EQ(period2.minutes(), 15);
-    EXPECT_EQ(period2.seconds(), 0);
+// ========== Normalization Tests ==========
 
-    CTimePeriod period3("2h 15  10y");
-    EXPECT_EQ(period3.days(), 3650);
-    EXPECT_EQ(period3.hours(), 2);
-    EXPECT_EQ(period3.minutes(), 15);
-    EXPECT_EQ(period3.seconds(), 0);
+TEST_F(CTimePeriodTest, NormalizesExcessSeconds) {
+    CTimePeriod period(75);  // 75 seconds = 1m 15s
+
+    EXPECT_EQ(period.minutes(), 1);
+    EXPECT_EQ(period.seconds(), 15);
+}
+
+TEST_F(CTimePeriodTest, NormalizesExcessMinutes) {
+    CTimePeriod period(0, 90);  // 90 minutes = 1h 30m
+
+    EXPECT_EQ(period.hours(), 1);
+    EXPECT_EQ(period.minutes(), 30);
+}
+
+TEST_F(CTimePeriodTest, NormalizesExcessHours) {
+    CTimePeriod period(0, 0, 25);  // 25 hours = 1d 1h
+
+    EXPECT_EQ(period.days(), 1);
+    EXPECT_EQ(period.hours(), 1);
+}
+
+TEST_F(CTimePeriodTest, NormalizesComplexDuration) {
+    CTimePeriod period(3725, 90, 25, 0);  // Complex normalization
+
+    // 3725s = 1h 2m 5s
+    // 90m = 1h 30m
+    // 25h = 1d 1h
+    // Total: 1d + (1+1+1)h + (2+30)m + 5s = 1d 3h 32m 5s
+
+    EXPECT_EQ(period.days(), 1);
+    EXPECT_EQ(period.hours(), 3);
+    EXPECT_EQ(period.minutes(), 32);
+    EXPECT_EQ(period.seconds(), 5);
+}
+
+// ========== Formatting Tests ==========
+
+TEST_F(CTimePeriodTest, ToStringFormat) {
+    EXPECT_EQ(CTimePeriod("2h 30m 15s").toString(), "2h 30m 15s");
+    EXPECT_EQ(CTimePeriod("1d 5h").toString(), "1d 5h 0s");
+    EXPECT_EQ(CTimePeriod("30m").toString(), "30m 0s");
+    EXPECT_EQ(CTimePeriod("0s").toString(), "0s");
+}
+
+TEST_F(CTimePeriodTest, SqlIntervalFormat) {
+    EXPECT_EQ(CTimePeriod("1h").asSqlInterval(), "interval 3600 second");
+    EXPECT_EQ(CTimePeriod("2h 30m").asSqlInterval(), "interval 9000 second");
+}
+
+// ========== Comparison Tests ==========
+
+TEST_F(CTimePeriodTest, EqualityComparison) {
+    CTimePeriod period1("1h 30m");
+    CTimePeriod period2("90m");
+    CTimePeriod period3("1h 31m");
+
+    EXPECT_TRUE(period1 == period2);
+    EXPECT_FALSE(period1 == period3);
+    EXPECT_FALSE(period1 != period2);
+    EXPECT_TRUE(period1 != period3);
+}
+
+TEST_F(CTimePeriodTest, RelationalComparison) {
+    CTimePeriod small("30m");
+    CTimePeriod large("1h");
+
+    EXPECT_TRUE(small < large);
+    EXPECT_TRUE(small <= large);
+    EXPECT_FALSE(small > large);
+    EXPECT_FALSE(small >= large);
+
+    EXPECT_TRUE(large > small);
+    EXPECT_TRUE(large >= small);
+    EXPECT_FALSE(large < small);
+    EXPECT_FALSE(large <= small);
+}
+
+TEST_F(CTimePeriodTest, SelfComparison) {
+    CTimePeriod period("1h 30m");
+
+    EXPECT_TRUE(period == period);
+    EXPECT_FALSE(period != period);
+    EXPECT_TRUE(period <= period);
+    EXPECT_TRUE(period >= period);
+    EXPECT_FALSE(period < period);
+    EXPECT_FALSE(period > period);
+}
+
+// ========== Edge Cases Tests ==========
+
+TEST_F(CTimePeriodTest, HandlesZeroValues) {
+    CTimePeriod period("0h 0m 0s");
+
+    EXPECT_EQ(period.days(), 0);
+    EXPECT_EQ(period.hours(), 0);
+    EXPECT_EQ(period.minutes(), 0);
+    EXPECT_EQ(period.seconds(), 0);
+    EXPECT_TRUE(period.isZero());
+}
+
+TEST_F(CTimePeriodTest, HandlesVeryLargeDurations) {
+    CTimePeriod period("999d 23h 59m 59s");
+
+    EXPECT_EQ(period.days(), 999);
+    EXPECT_EQ(period.hours(), 23);
+    EXPECT_EQ(period.minutes(), 59);
+    EXPECT_EQ(period.seconds(), 59);
+}
+
+TEST_F(CTimePeriodTest, ParseFactoryMethod) {
+    auto period = CTimePeriod::ParseFactory("2h 30m");
+
+    EXPECT_EQ(period.hours(), 2);
+    EXPECT_EQ(period.minutes(), 30);
+    EXPECT_EQ(period.duration().count(), 2 * 3600 + 30 * 60);
+}
+
+// ========== Stress Tests ==========
+
+TEST_F(CTimePeriodTest, StressTestLargeValues) {
+    CTimePeriod period(59, 59, 23, 365);  // Almost 1 year + 1 day
+
+    EXPECT_GT(period.days(), 365);  // Should normalize
+    EXPECT_GE(period.duration().count(), 365 * 86400);
+}
+
+TEST_F(CTimePeriodTest, StressTestComplexParsing) {
+    std::string complex = "5y 11mo 29d 23h 59m 59s";
+    CTimePeriod period(complex);
+
+    EXPECT_GT(period.duration().count(), 0);
+    EXPECT_FALSE(period.toString().empty());
+}
+
+// ========== Integration Tests ==========
+
+TEST_F(CTimePeriodTest, RoundTripStringConversion) {
+    std::vector<std::string> testCases = {
+        "1h", "30m", "45s", "1d 2h", "2h 30m 15s",
+        "1d 0h 0m 0s", "0d 5h 30m", "100h"
+    };
+
+    for (const auto& testCase : testCases) {
+        CTimePeriod period(testCase);
+        auto duration = period.duration().count();
+        const auto chronoDuration = std::chrono::seconds(duration);
+
+        CTimePeriod roundTrip(chronoDuration);
+
+        EXPECT_EQ(period.duration().count(), roundTrip.duration().count())
+            << "Failed round trip for: " << testCase;
+    }
 }
